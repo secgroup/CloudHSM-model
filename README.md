@@ -15,7 +15,7 @@ The full model can be checked with Tamarin as follows (about 1m50s on a MacBook 
 $ tamarin-prover --prove HSM_model_CCS_cameraready.spthy
 ```
 
-To only check the secrecy lemma (about 22s on a MacBook pro 2018):
+To only check the secrecy lemmas (about 22s on a MacBook pro 2018):
 
 ```bash
 $ tamarin-prover --prove=Secrecy* HSM_model_CCS_cameraready.spthy
