@@ -19,7 +19,7 @@
  * 
  * Check with: 
  * tamarin-prover --prove --quit-on-warning HSM_model_CCS_cameraready.spthy
- * (about 1m 50s on a MacBook pro 2018)
+ * (about 1m50s on a MacBook pro 2018)
  *
  * Check only the secrecy lemmas with:
  * tamarin-prover --prove=Secrecy* --quit-on-warning HSM_model_CCS_cameraready.spthy
