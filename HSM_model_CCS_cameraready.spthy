@@ -1,5 +1,5 @@
 /*
- * Full Tamarin model for the ACM CCS'21 paper:
+ * Tamarin model for the ACM CCS'21 paper:
  * 
  * A Formally Verified Configuration for Hardware Security Modules in 
  * the Cloud by R. Focardi and F. L. Luccio.
