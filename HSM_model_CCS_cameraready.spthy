@@ -5,7 +5,7 @@
  * the Cloud by R. Focardi and F. L. Luccio.
  * 
  * Rationale: we model the trusted part and keep everything else Dolev-Yao. 
- * We don't want to model untrusted keys in detail because we know they are 
+ * We do not model untrusted keys in detail because we know they are 
  * insecure-by-construction. Modeling just the trusted part of the API 
  * simplifies the model and is a new contribution by itself.
  *
@@ -218,9 +218,7 @@ All ha a #i . IsSet(ha,a)@i ==>
  * there exist an UnsetAttr(U,ha,a) before IsSet(ha,a) and any 
  * SetAttr(W,ha,a) before IsSet(ha,a) is also before UnsetAttr(U,ha,a)
  * (this part is the dual of IsSet above)
- *
  * OR
- *
  * there exist no SetAttr(U,ha,a) before IsUnset(ha,a).
  */
 restriction IsUnset:
@@ -286,6 +284,7 @@ All U k1 ha1 ha2 #i .
 )
 "
 
+
 /* 
  * Sanity:
  *
@@ -314,6 +313,7 @@ All U k1 ha1 ha2 #i .
  *                 are never set as extractable in their whole life-cycle 
  *                 (SanityRule1_3)
  */
+
 lemma SanityRule1_1:
 "
 All U ha k #i . 
@@ -413,6 +413,7 @@ All W ha #i . SetAttr(W,ha,'trusted')@i
  *   required formula;
  * - some intuitive constraints hold (see comments).
  */
+
 lemma SanityUsers:
 exists-trace
 "
@@ -527,8 +528,7 @@ All U ha #i .
 lemma SanityWrap :
 exists-trace
 "
-Ex U ha1 ha2  #i .
-  Wrap  (U,ha1,ha2)@i
+Ex U ha1 ha2  #i . Wrap(U,ha1,ha2)@i
 "
 
 lemma SanityWrapWWT :
