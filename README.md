@@ -8,7 +8,7 @@ To check the model you need to install the [Tamarin prover](https://tamarin-prov
 
 ## Usage
 
-The full model can be checked with Tamarin as follows (about 1m50s on a MacBook pro 2018):
+The full model can be checked with Tamarin as follows (about 1m30s on a MacBook pro 2018):
 
 ```bash
 $ tamarin-prover --prove HSM_model_CCS_cameraready.spthy
