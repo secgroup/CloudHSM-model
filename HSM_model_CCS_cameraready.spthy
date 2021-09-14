@@ -1,6 +1,9 @@
 /*
- * Cloud HSM secure configuration: To appear at ACM CCS, November 2021
- *
+ * Full Tamarin model for the ACM CCS'21 paper:
+ * 
+ * A Formally Verified Configuration for Hardware Security Modules in 
+ * the Cloud by R. Focardi and F. L. Luccio.
+ * 
  * Rationale: we model the trusted part and keep everything else Dolev-Yao. 
  * We don't want to model untrusted keys in detail because we know they are 
  * insecure-by-construction. Modeling just the trusted part of the API 
@@ -8,21 +11,21 @@
  *
  * Some keys are leaked explicitly:
  *
- * - encrypt/decrypt keys (they can be used arbitrarily)
+ * - encrypt/decrypt keys (they can be used arbitrarily);
  *
  * - extractable and non wrap_with_trusted keys, as they are subject to 
- *   known API-level attacks
+ *   known API-level attacks.
  *
  * Attacks found here are attacks in the full model. In order to distinguish
  * between a key and its value we actually leak a one-way hash of the key
  * and we always use the hash to perform cryptographic operations.
  * 
  * Check with: 
- * tamarin-prover --prove --quit-on-warning HSM_model_CCS_cameraready.spthy
+ * tamarin-prover --prove HSM_model_CCS_cameraready.spthy
  * (about 1m50s on a MacBook pro 2018)
  *
  * Check only the secrecy lemmas with:
- * tamarin-prover --prove=Secrecy* --quit-on-warning HSM_model_CCS_cameraready.spthy
+ * tamarin-prover --prove=Secrecy* HSM_model_CCS_cameraready.spthy
  * (about 22s on a MacBook pro 2018)
  */
 
@@ -33,7 +36,7 @@ begin
 builtins: symmetric-encryption, hashing
 
 /*
- * User roles
+ * User roles:
  * 
  * NU: Normal user (for production applications)
  * KM: Key Manager (implemented as a normal PKCS11 user)
@@ -95,15 +98,15 @@ rule IsHandle:
 /*
  * Attributes
  *
- * - extractable: key is extractable, can only be unset
- * - wrap: key can wrap other keys 
- * - unwrap: key can unwrap other keys 
- * - encrypt: key can encrypt data 
- * - decrypt: key can decrypt data 
- * - wrap_with_trusted: key can be wrapped under trusted keys.
- *   Can be set but not unset.
+ * - extractable: key is extractable, can only be unset;
+ * - wrap: key can wrap other keys;
+ * - unwrap: key can unwrap other keys;
+ * - encrypt: key can encrypt data;
+ * - decrypt: key can decrypt data;
+ * - wrap_with_trusted: key can be wrapped under trusted keys,
+ *   can be set but not unset.
  *   Note that we only model trusted wrapping so these are the
- *   only keys that are wrapped in the model.
+ *   only keys that are wrapped in the model;
  * - trusted: keys that can wrap wrap_with_trusted ones.
  *   These can only be set by the SO.
  */
@@ -140,9 +143,9 @@ rule UnsetAttrTrusted:
 
 /* 
  * Trusted wrap: Key(U1,ha1,k1) can be wrapped under Key(U2,ha2,k2) if
- * - ha1 is wrap_with_trusted and extractable
- * - ha2 is trusted and wrap
- * The ciphertext senc(k1,k2) is sent as output
+ * - ha1 has wrap_with_trusted and extractable set;
+ * - ha2 has trusted and wrap set.
+ * The ciphertext senc(k1,k2) is sent as output.
  */
 rule Wrap:
   [ !NU(U), !Key(U1,ha1,k1), !Key(U2,ha2,k2) ] 
@@ -155,8 +158,8 @@ rule Wrap:
 
 /*
  * Trusted unwrap: Key(U1,ha1,k1) can be unwrapped under Key(U2,ha2,k2) if
- * - ha2 is trusted and unwrap
- * The new key Key(U1,ha1,k1) has wrap_with_trusted and extractable set
+ * ha2 has trusted and unwrap set.
+ * The new key Key(U1,ha1,k1) has wrap_with_trusted and extractable set.
  */
 rule Unwrap:
   [ !NU(U1), !Key(U2,ha2,k2), In(senc(k1,h(k2))), Fr(ha1) ] 
@@ -170,7 +173,7 @@ rule Unwrap:
 
 /*
  * We leak (a hash of) encrypt/decrypt key so that attacker does 
- * any crypto operation
+ * any crypto operation.
  */
 rule LeakEncKey:
   [ !Key(U,ha,k) ]
@@ -184,7 +187,7 @@ rule LeakDecKey:
 
 /*
  * Non wrap_with_trusted keys that are extractable are implicitly 
- * compromised
+ * compromised.
  */
 rule LeakExtractable:
   [ !Key(U,ha,k) ]
@@ -195,11 +198,11 @@ rule LeakExtractable:
 /*
  * An attribute a is set over ha, written IsSet(ha,a) if there exist 
  * a SetAttr(U,ha,a) before IsSet(ha,a) and any occurrence of
- * UnsetAttr(W,ha,a) before IsSet(ha,a) is also before SetAttr(U,ha,a)
+ * UnsetAttr(W,ha,a) before IsSet(ha,a) is also before SetAttr(U,ha,a).
  *
  * Intuitively: if there are many occurrences of SetAttr(U,ha,a) and 
  * UnsetAttr(U,ha,a), it must be that SetAttr(U,ha,a) is the last one 
- * before IsSet(ha,a)
+ * before IsSet(ha,a).
  */
 restriction IsSet:
 "
@@ -218,7 +221,7 @@ All ha a #i . IsSet(ha,a)@i ==>
  *
  * OR
  *
- * there exist no SetAttr(U,ha,a) before IsUnset(ha,a)
+ * there exist no SetAttr(U,ha,a) before IsUnset(ha,a).
  */
 restriction IsUnset:
 "
@@ -232,10 +235,10 @@ All ha a #i . IsUnset(ha,a)@i ==>
 "
 
 /*
- * Restricting SO behavior
+ * Restricting SO behavior:
  * 
  * If a SO makes ha trusted then the key have been created as 
- * non extractable by a KM
+ * non extractable by a KM.
  */
 restriction SO:
 "
@@ -247,9 +250,9 @@ Ex k U #j #w .
 "
 
 /*
- * Restricting KM behavior
+ * Restricting KM behavior:
  *
- * KM can only make candidate keys wrap or unwrap
+ * KM can only make candidate keys wrap or unwrap.
  */
 restriction KM:
 "
@@ -344,7 +347,7 @@ All U ha k #i #j.
  *
  * - only the SO can set the attribute trusted (SanityRule2_1)
  *
- * - candidate keys are generated by a KM as non extractable keys (SanityRule2_2)
+ * - candidate keys are generated by a KM with extractable unset (SanityRule2_2)
  */
 lemma SanityRule2_1:
 "
@@ -546,8 +549,8 @@ Ex U ha1 ha2  #i .
  * Proof of security: 
  *
  * SecrecyTrusted: trusted keys are never leaked
- * SecrecyNE: non extractable keys that are not leaked explicitly remain secret
- * SecrecyWWT: wrap_with_trusted keys that are not leaked explicitly remain secret
+ * SecrecyNE: non extractable keys are never leaked
+ * SecrecyWWT: wrap_with_trusted keys are never leaked
  */
 
 
