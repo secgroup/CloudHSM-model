@@ -1,6 +1,6 @@
 # CloudHSM-model
 
-This repository contains the [Tamarin prover model](https://github.com/secgroup/CloudHSM-model/blob/main/HSM_model_CCS_cameraready.spthy) that we used to specify and check the Cloud HSM secure configuration described in the paper *A Formally Verified Configuration for Hardware Security Modules in the Cloud*, by R. Focardi and F. L. Luccio, presentation at [ACM CCS 2021](https://www.sigsac.org/ccs/CCS2021/) in November 2021.
+This repository contains the Tamarin prover model that we used to specify and check the Cloud HSM secure configuration described in the paper *A Formally Verified Configuration for Hardware Security Modules in the Cloud*, by R. Focardi and F. L. Luccio, presentation at [ACM CCS 2021](https://www.sigsac.org/ccs/CCS2021/) in November 2021.
 
 Currently we make available two versions of the model:
 
