@@ -1,0 +1,602 @@
+/*
+ * Updated Tamarin model for the ACM CCS'21 paper:
+ * 
+ * A Formally Verified Configuration for Hardware Security Modules in 
+ * the Cloud by R. Focardi and F. L. Luccio.
+ * 
+ * The original model from the paper is still available in the file:
+ * HSM_model_CCS_cameraready.spthy
+ *
+ * This file contains the following updates:
+ * - K(...) instead of KU(...) to model attacker knowledge in the three
+ *   secrecy lemmas. KU is in fact Tamarin-internal. Lemmas are still
+ *   proved automatically but the check is a bit slower (see below).
+ *   Thanks to Cas Cremers for suggesting this fix.
+ *
+ * Rationale: we model the trusted part and keep everything else Dolev-Yao. 
+ * We do not model untrusted keys in detail because we know they are 
+ * insecure-by-construction. Modeling just the trusted part of the API 
+ * simplifies the model and is a new contribution by itself.
+ *
+ * Some keys are leaked explicitly:
+ *
+ * - encrypt/decrypt keys (they can be used arbitrarily);
+ *
+ * - extractable and non wrap_with_trusted keys, as they are subject to 
+ *   known API-level attacks.
+ *
+ * Attacks found here are attacks in the full model. In order to distinguish
+ * between a key and its value we actually leak a one-way hash of the key
+ * and we always use the hash to perform cryptographic operations.
+ * 
+ * Check with: 
+ * tamarin-prover --prove HSM_model_CCS_updated.spthy
+ * (about 1m50s on a MacBook pro 2018)
+ *
+ * Check only the secrecy lemmas with:
+ * tamarin-prover --prove=Secrecy* HSM_model_CCS_updated.spthy
+ * (about 1m on a MacBook pro 2018)
+ */
+
+theory HSM_model_CCS
+
+begin
+
+builtins: symmetric-encryption, hashing
+
+/*
+ * User roles:
+ * 
+ * NU: Normal user (for production applications)
+ * KM: Key Manager (implemented as a normal PKCS11 user)
+ * SO: Security Officer
+ *
+ * NOTE: users are fresh names to prevent role clashes. See also
+ * lemma SanityUsersRole below.
+ */
+rule NewNU:
+  [ Fr(U) ] --[ NewNU(U) ]-> [ !NU(U) ] // Normal User
+
+rule NewKM: 
+  [ Fr(U) ] --[ NewKM(U) ]-> [ !NU(U) ] // Key Manager, a special NU
+
+rule NewSO:
+  [ Fr(U) ] --[ NewSO(U) ]-> [ !SO(U) ] // Security Officer
+
+/*
+ * Key creation and import.
+ *
+ * NOTE: Keys are created/imported with extractable set, 
+ * since it cannot be set later on, only unset.
+ *
+ * We also need keys generated: 
+ * - with extractable unset, that will become trusted (CreateNEKey)
+ * - with wrap_with_trusted set, that will remain secure (CreateWWTKey)
+ */
+rule CreateKey:
+  [ !NU(U), Fr(ha), Fr(k) ] 
+--[ CreateKey(U,ha,k), 
+    SetAttr(U,ha,'extractable') ]->
+  [ !Key(U,ha,k) ]
+
+rule CreateWWTKey:
+  [ !NU(U), Fr(ha), Fr(k) ] 
+--[ CreateWWTKey(U,ha,k), 
+    SetAttr(U,ha,'wrap_with_trusted'), 
+    SetAttr(U,ha,'extractable') ]->
+  [ !Key(U,ha,k) ]
+
+rule CreateNEKey:
+  [ !NU(U), Fr(ha), Fr(k) ] 
+--[ CreateNEKey(U,ha,k) ]->
+  [ !Key(U,ha,k) ]
+
+rule ImportKey:
+  [ !NU(U), Fr(ha), In(k) ] 
+--[ ImportKey(U,ha,k), 
+    SetAttr(U, ha, 'extractable') ]->
+  [ !Key(U,ha,k) ]
+
+/*
+ * This is never used in the model but just in lemmas/restrictions.
+ * In some lemmas we need to check the mapping handle->key
+ */
+rule IsHandle:
+  [ !Key(U,ha,k) ] --[ IsHandle(ha,k) ]-> [ ]
+
+/*
+ * Attributes
+ *
+ * - extractable: key is extractable, can only be unset;
+ * - wrap: key can wrap other keys;
+ * - unwrap: key can unwrap other keys;
+ * - encrypt: key can encrypt data;
+ * - decrypt: key can decrypt data;
+ * - wrap_with_trusted: key can be wrapped under trusted keys,
+ *   can be set but not unset.
+ *   Note that we only model trusted wrapping so these are the
+ *   only keys that are wrapped in the model;
+ * - trusted: keys that can wrap wrap_with_trusted ones.
+ *   These can only be set by the SO.
+ */
+rule UnsetAttrExtractable:
+  [ !Key(U,ha,k), !NU(U) ] --[ UnsetAttr(U,ha,'extractable') ]-> [ ]
+
+rule SetAttrWrap:
+  [ !Key(U,ha,k), !NU(U) ] --[ SetAttr  (U,ha,'wrap')   ]-> [ ]
+rule UnsetAttrWrap:
+  [ !Key(U,ha,k), !NU(U) ] --[ UnsetAttr(U,ha,'wrap')   ]-> [ ]
+
+rule SetAttrUnwrap:
+  [ !Key(U,ha,k), !NU(U) ] --[ SetAttr  (U,ha,'unwrap') ]-> [ ]
+rule UnsetAttrUnwrap:
+  [ !Key(U,ha,k), !NU(U) ] --[ UnsetAttr(U,ha,'unwrap') ]-> [ ]
+
+rule SetAttrEncrypt:
+  [ !Key(U,ha,k), !NU(U) ] --[ SetAttr  (U,ha,'encrypt') ]-> [ ]
+rule UnsetAttrEncrypt:
+  [ !Key(U,ha,k), !NU(U) ] --[ UnsetAttr(U,ha,'encrypt') ]-> [ ]
+
+rule SetAttrDecrypt:
+  [ !Key(U,ha,k), !NU(U) ] --[ SetAttr  (U,ha,'decrypt') ]-> [ ]
+rule UnsetAttrDecrypt:
+  [ !Key(U,ha,k), !NU(U) ] --[ UnsetAttr(U,ha,'decrypt') ]-> [ ]
+
+rule SetAttrWrapWithTrusted:
+  [ !Key(U,ha,k), !NU(U) ] --[ SetAttr(U,ha,'wrap_with_trusted') ]-> [ ]
+
+rule SetAttrTrusted:
+  [ !Key(U,ha,k), !SO(W) ] --[ SetAttr  (W,ha,'trusted') ]-> [ ]
+rule UnsetAttrTrusted:
+  [ !Key(U,ha,k), !SO(W) ] --[ UnsetAttr(W,ha,'trusted') ]-> [ ]
+
+/* 
+ * Trusted wrap: Key(U1,ha1,k1) can be wrapped under Key(U2,ha2,k2) if
+ * - ha1 has wrap_with_trusted and extractable set;
+ * - ha2 has trusted and wrap set.
+ * The ciphertext senc(k1,k2) is sent as output.
+ */
+rule Wrap:
+  [ !NU(U), !Key(U1,ha1,k1), !Key(U2,ha2,k2) ] 
+--[ Wrap(U,ha1,ha2),
+    IsSet(ha1,'wrap_with_trusted'), 
+    IsSet(ha1,'extractable'), 
+    IsSet(ha2,'trusted'),
+    IsSet(ha2,'wrap') ]-> 
+  [ Out(senc(k1,h(k2))) ]
+
+/*
+ * Trusted unwrap: Key(U1,ha1,k1) can be unwrapped under Key(U2,ha2,k2) if
+ * ha2 has trusted and unwrap set.
+ * The new key Key(U1,ha1,k1) has wrap_with_trusted and extractable set.
+ */
+rule Unwrap:
+  [ !NU(U1), !Key(U2,ha2,k2), In(senc(k1,h(k2))), Fr(ha1) ] 
+--[ Unwrap(U1,ha1,ha2),
+    IsHandle(ha1,k1), // used in lemma
+    IsSet(ha2,'trusted'), 
+    IsSet(ha2,'unwrap'),
+    SetAttr(U1, ha1, 'wrap_with_trusted'), 
+    SetAttr(U1, ha1, 'extractable') ]-> 
+  [ !Key(U1,ha1,k1) ] 
+
+/*
+ * We leak (a hash of) encrypt/decrypt key so that attacker does 
+ * any crypto operation.
+ */
+rule LeakEncKey:
+  [ !Key(U,ha,k) ]
+--[ IsSet(ha,'encrypt') ]->
+  [ Out(h(k)) ]
+
+rule LeakDecKey:
+  [ !Key(U,ha,k) ]
+--[ IsSet(ha,'decrypt') ]->
+  [ Out(h(k)) ]
+
+/*
+ * Non wrap_with_trusted keys that are extractable are implicitly 
+ * compromised.
+ */
+rule LeakExtractable:
+  [ !Key(U,ha,k) ]
+--[ IsSet(ha,'extractable'), 
+    IsUnset(ha,'wrap_with_trusted') ]->
+  [ Out(h(k)) ]
+
+/*
+ * An attribute a is set over ha, written IsSet(ha,a) if there exist 
+ * a SetAttr(U,ha,a) before IsSet(ha,a) and any occurrence of
+ * UnsetAttr(W,ha,a) before IsSet(ha,a) is also before SetAttr(U,ha,a).
+ *
+ * Intuitively: if there are many occurrences of SetAttr(U,ha,a) and 
+ * UnsetAttr(U,ha,a), it must be that SetAttr(U,ha,a) is the last one 
+ * before IsSet(ha,a).
+ */
+restriction IsSet:
+"
+All ha a #i . IsSet(ha,a)@i ==> 
+(
+  Ex U #j . SetAttr(U,ha,a)@j & j<i &
+  (All W #w . UnsetAttr(W,ha,a)@w & w<i ==> w<j)
+)
+"
+
+/*
+ * An attribute a is unset over ha, written IsUnset(ha,a) if 
+ * there exist an UnsetAttr(U,ha,a) before IsSet(ha,a) and any 
+ * SetAttr(W,ha,a) before IsSet(ha,a) is also before UnsetAttr(U,ha,a)
+ * (this part is the dual of IsSet above)
+ * OR
+ * there exist no SetAttr(U,ha,a) before IsUnset(ha,a).
+ */
+restriction IsUnset:
+"
+All ha a #i . IsUnset(ha,a)@i ==> 
+(
+  (Ex U #j . UnsetAttr(U,ha,a)@j & j<i &
+    (All W #w . SetAttr(W,ha,a)@w & w<i ==> w<j))
+  |
+  (not Ex U #j . SetAttr(U,ha,a)@j & j<i)
+)
+"
+
+/*
+ * Restricting SO behavior:
+ * 
+ * If a SO makes ha trusted then the key have been created as 
+ * non extractable by a KM.
+ */
+restriction SO:
+"
+All W ha #i . SetAttr(W,ha,'trusted')@i
+==>
+Ex k U #j #w . 
+  CreateNEKey(U,ha,k)@j & j<i &
+  NewKM(U)@w & w<i
+"
+
+/*
+ * Restricting KM behavior:
+ *
+ * KM can only make candidate keys wrap or unwrap.
+ */
+restriction KM:
+"
+All U ha k a #i #j #w.  
+  NewKM(U)@i &
+  CreateNEKey(U,ha,k)@j &
+  SetAttr(U,ha,a)@w
+==> 
+  ( a='wrap' | a='unwrap' )
+"
+
+/*
+ * This lemma is necessary to make the analysis convergent and efficient. 
+ * Tamarin cannot compute the possible sources of terms (because of partial
+ * deconstructions) and the lemma tells that unwrapped keys come from previous 
+ * API operations such as CreateKey, CreateWWTKey and ImportKey. CreateNEKey 
+ * is not possible as it generates non extractable keys.
+ */
+lemma Unwrap [sources, reuse]:
+"
+All U k1 ha1 ha2 #i . 
+  Unwrap(U,ha1,ha2)@i & 
+  IsHandle(ha1,k1)@i
+==> 
+(
+  (Ex W ha #j . CreateKey(W,ha,k1)@j & j<i)
+  |
+  (Ex W ha #j . CreateWWTKey(W,ha,k1)@j & j<i)
+  |
+  (Ex W ha #j . ImportKey(W,ha,k1)@j & j<i)
+)
+"
+
+
+/* 
+ * Sanity:
+ *
+ * Besides simple sanity lemmas that check that the model really does something
+ * (i.e., they check that all the actions are possible, see below) we prove 
+ * that the five rules presented in the paper (cf. Section 3.4) are respected.
+ */
+
+/*
+ * Rule 1: (Sensitive keys). Any sensitive key stored in the HSM should either 
+ * be generated with attribute wrap_with_trusted set, or with attribute 
+ * extractable unset. 
+ *
+ * We have two specific actions corresponding to the above cases which set the 
+ * appropriate attributes. Notice that we will prove the secrecy of these 
+ * particular cases (cf. lemmas SecrecyWWT and SecrecyNE). We also have the
+ * case of trusted keys. In particular:
+ *
+ * - CreateWWTKey: creates a key that has wrap_with_trusted set. We additionally 
+ *                 check that the attribute cannot be unset (SanityRule1_1)
+ *
+ * - CreateNEKey:  creates a key that has extractable unset. We actually 
+ *                 check that the attribute can never be set (SanityRule1_2)
+ *
+ * - Trusted keys: trusted keys should be sensitive. We prove that they are
+ *                 are never set as extractable in their whole life-cycle 
+ *                 (SanityRule1_3)
+ */
+
+lemma SanityRule1_1:
+"
+All U ha k #i . 
+  CreateWWTKey(U,ha,k)@i 
+==> (
+  SetAttr(U,ha,'wrap_with_trusted')@i &
+  not Ex W #j . UnsetAttr(W,ha,'wrap_with_trusted')@j
+)
+"
+
+lemma SanityRule1_2:
+"
+All U ha k #i . 
+  CreateNEKey(U,ha,k)@i 
+==> not Ex W #j . SetAttr(W,ha,'extractable')@j
+"
+
+lemma SanityRule1_3:
+"
+All U ha k #i #j. 
+  IsHandle(ha,k)@i & 
+  SetAttr(U,ha,'trusted')@j 
+==> not Ex W #w . SetAttr(W,ha,'extractable')@w
+"
+
+/*
+ * Rule 2: (Trusted keys). The SO sets attribute trusted only on special 
+ * candidate keys generated by one of the KMs.
+ *
+ * We check that: 
+ *
+ * - only the SO can set the attribute trusted (SanityRule2_1)
+ *
+ * - candidate keys are generated by a KM with extractable unset (SanityRule2_2)
+ */
+lemma SanityRule2_1:
+"
+All W ha #i . SetAttr(W,ha,'trusted')@i
+==> Ex #j . NewSO(W)@j& j<i
+"
+
+lemma SanityRule2_2:
+"
+All W ha #i . SetAttr(W,ha,'trusted')@i
+==> (
+  Ex U k #j #w . 
+    NewKM(U)@j & j<i & 
+    CreateNEKey(U,ha,k)@w & j<w & w<i
+)
+"
+
+/*
+ * Rule 3: (Roles of candidate keys). The candidate keys managed by the KMs 
+ * should only admit wrap and unwrap cryptographic operations during their 
+ * whole lifetime.
+ */
+lemma SanityRule3:
+"
+All U W ha a #i #j #w. 
+  SetAttr(W,ha,'trusted')@i & 
+  SetAttr(U,ha,a)@j & 
+  NewKM(U)@w 
+==> ( a = 'wrap' | a = 'unwrap' )
+"
+
+/* 
+ * Rule 4: (Management of candidate keys). The candidate keys managed by the 
+ * KMs should be generated with the extractable attribute unset.
+ *
+ * We actually check that candidate keys have the extractable attribute unset 
+ * during their whole lifetime.
+ */
+
+lemma SanityRule4:
+"
+All W ha #i . SetAttr(W,ha,'trusted')@i
+==> (
+  (Ex U #j . NewKM(U)@j & j<i) &
+  (not Ex U #j . SetAttr(U,ha,'extractable')@j )
+)
+"
+
+/* 
+ * Rule 5: (Freshness of candidate keys). The candidate keys managed by the 
+ * KMs should be generated as fresh in the device.
+ *
+ * This comes implicitly from the definition of rule CreateNEKey that requires
+ * Fr(k) in the premise.
+ */
+
+/*
+ * The following sanity lemmas are important to check that the model really 
+ * does something.
+ * We check that 
+ * - all the actions are possible (the model can be executed). These lemmas 
+ *   are of the form exists-trace as they look for one trace satisfying the
+ *   required formula;
+ * - some intuitive constraints hold (see comments).
+ */
+
+lemma SanityUsers:
+exists-trace
+"
+Ex U1 U2 U3 #i1 #i2 #i3.
+  NewSO(U1)@i1 &
+  NewNU(U2)@i2 &
+  NewKM(U3)@i3 
+"
+
+/* 
+ * Users can only have one role. This is guaranteed by the freshness
+ * of U in rules NewNU, NewKM, NewSO
+ */
+lemma SanityUsersRole:
+"
+All U1 U2 #i1 #i2 . NewSO(U1)@i1 & NewNU(U2)@i2 ==> not U1 = U2 &
+All U1 U2 #i1 #i2 . NewSO(U1)@i1 & NewKM(U2)@i2 ==> not U1 = U2 &
+All U1 U2 #i1 #i2 . NewNU(U1)@i1 & NewKM(U2)@i2 ==> not U1 = U2 
+"
+
+lemma SanityKeys:
+exists-trace
+"
+Ex U ha1 k1 ha2 k2 ha3 k3 ha4 k4 #i1 #i2 #i3 #i4
+  .
+  CreateKey   (U,ha1,k1)@i1 &
+  CreateWWTKey(U,ha2,k2)@i2 &
+  CreateNEKey (U,ha3,k3)@i3 &
+  ImportKey   (U,ha4,k4)@i4 
+"
+
+lemma SanityAttributesWrap:
+exists-trace
+"
+Ex U ha #i #j.
+  SetAttr  (U,ha,'wrap')@i &
+  UnsetAttr(U,ha,'wrap')@j 
+"
+
+lemma SanityAttributesUnwrap:
+exists-trace
+"
+Ex U ha #i #j.
+  SetAttr  (U,ha,'unwrap')@i &
+  UnsetAttr(U,ha,'unwrap')@j 
+"
+
+lemma SanityAttributesEncrypt:
+exists-trace
+"
+Ex U ha #i #j.
+  SetAttr  (U,ha,'encrypt')@i &
+  UnsetAttr(U,ha,'encrypt')@j 
+"
+
+lemma SanityAttributesDecrypt:
+exists-trace
+"
+Ex U ha #i #j.
+  SetAttr  (U,ha,'decrypt')@i &
+  UnsetAttr(U,ha,'decrypt')@j 
+"
+
+lemma SanityAttributesTrusted:
+exists-trace
+"
+Ex U ha #i #j.
+  SetAttr  (U,ha,'trusted')@i &
+  UnsetAttr(U,ha,'trusted')@j 
+"
+
+lemma SanityAttributesExtractable1:
+exists-trace
+"
+Ex U ha #i.
+  UnsetAttr(U,ha,'extractable')@i
+"
+
+/* 
+ * extractable can be set only by the following rules:
+ * - CreateKey
+ * - CreateWWTKey
+ * - ImportKey
+ * - Unwrap
+ */
+lemma SanityAttributesExtractable2:
+"
+All U ha #i. SetAttr  (U,ha,'extractable')@i 
+==> (
+  (Ex k . CreateKey(U,ha,k)@i    ) |
+  (Ex k . CreateWWTKey(U,ha,k)@i ) |
+  (Ex k . ImportKey(U,ha,k)@i    ) |
+  (Ex ha2 . Unwrap(U,ha,ha2)@i   )  
+)
+"
+
+lemma SanityAttributesWWT1:
+exists-trace
+"
+Ex U ha #i .
+  SetAttr  (U,ha,'wrap_with_trusted')@i 
+"
+
+/* wrap_with_trusted cannot be unset */
+lemma SanityAttributesWWT2:
+"
+All U ha #i .
+  UnsetAttr(U,ha,'wrap_with_trusted')@i 
+  ==> F
+"
+
+lemma SanityWrap :
+exists-trace
+"
+Ex U ha1 ha2  #i . Wrap(U,ha1,ha2)@i
+"
+
+lemma SanityWrapWWT :
+exists-trace
+"
+Ex U W ha1 k1 ha2  #i #j.
+  Wrap  (U,ha1,ha2)@i & CreateWWTKey(W,ha1,k1)@j & j<i
+"
+
+lemma SanityUnwrap :
+exists-trace
+"
+Ex U ha1 ha2  #i .
+  Unwrap(U,ha1,ha2)@i 
+"
+
+/*
+ * Proof of security: 
+ *
+ * SecrecyTrusted: trusted keys are never leaked
+ * SecrecyNE: non extractable keys are never leaked
+ * SecrecyWWT: wrap_with_trusted keys are never leaked
+ */
+
+
+/* 
+ * Keys which are generated as with extractable unset are never leaked.
+ * This lemma speeds-up consistently the proof of next ones so we prove it
+ * as first with the "reuse" label.
+ */
+lemma SecrecyNE [reuse]:
+"
+All U ha k #i #j . 
+  CreateNEKey(U,ha,k)@i & 
+  K(k)@j 
+==> F
+"
+
+/*
+ * Keys which, at some point, are marked as trusted are never leaked.
+ */
+lemma SecrecyTrusted:
+"
+All W ha k #i #j #w. 
+  IsHandle(ha,k)@i & 
+  SetAttr(W,ha,'trusted')@j & 
+  K(k)@w 
+==> F
+"
+
+/* 
+ * Keys which are generated with wrap_with_trusted set are never leaked.
+ */
+lemma SecrecyWWT:
+"
+All U ha k #i #j . 
+  CreateWWTKey(U,ha,k)@i & 
+  K(k)@j 
+==> F
+"
+
+end
