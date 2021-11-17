@@ -2,7 +2,7 @@
 
 This repository contains the Tamarin prover model that we used to specify and check the Cloud HSM secure configuration described in the paper:
 
-R. Focardi and F. L. Luccio. *A Formally Verified Configuration for Hardware Security Modules in the Cloud*. [ACM CCS 2021](https://www.sigsac.org/ccs/CCS2021/), November 2021. [[Conference proceedings and presentation](https://dl.acm.org/doi/10.1145/3460120.3484785)][[Author's version on arxiv](https://arxiv.org/abs/2109.13631)]
+R. Focardi and F. L. Luccio. *A Formally Verified Configuration for Hardware Security Modules in the Cloud*. [ACM CCS 2021](https://www.sigsac.org/ccs/CCS2021/), November 2021. [[Conference version and presentation](https://dl.acm.org/doi/10.1145/3460120.3484785)][[Author's version on arxiv](https://arxiv.org/abs/2109.13631)]
 
 ## Model
 
